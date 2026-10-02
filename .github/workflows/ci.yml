@@ -1,0 +1,45 @@
+name: Arrow 59 compatibility
+
+on:
+  pull_request:
+  push:
+    branches: [main, upgrade/arrow-59]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:latest
+        env:
+          CLICKHOUSE_USER: arrow59
+          CLICKHOUSE_PASSWORD: arrow59-test
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "clickhouse-client --user arrow59 --password arrow59-test --query 'SELECT 1'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: clippy, rustfmt
+      - name: Format
+        run: cargo +1.96.0 fmt --check
+      - name: Unit tests and FFI-enabled compilation
+        run: cargo +1.96.0 test --all-features
+      - name: Lint
+        run: cargo +1.96.0 clippy --all-features --all-targets -- -D warnings
+      - name: Live ClickHouse query, metadata and ingestion
+        env:
+          ADBC_CLICKHOUSE_URI: 127.0.0.1:9000
+          ADBC_CLICKHOUSE_USER: arrow59
+          ADBC_CLICKHOUSE_PASSWORD: arrow59-test
+        run: cargo +1.96.0 test --all-features --test live_clickhouse -- --ignored

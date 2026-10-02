@@ -124,7 +124,7 @@ impl Connection for ClickhouseConnection {
     fn get_info(
         &self,
         codes: Option<HashSet<adbc_core::options::InfoCode>>,
-    ) -> Result<impl RecordBatchReader + Send> {
+    ) -> Result<Box<dyn RecordBatchReader + Send>> {
         let codes = codes.unwrap_or_else(|| INFO_FIELDS.clone());
         let codes = codes.intersection(&INFO_FIELDS);
 
@@ -149,7 +149,7 @@ impl Connection for ClickhouseConnection {
 
         let batch = get_info_builder.finish()?;
         let reader = SingleBatchReader::new(batch);
-        Ok(reader)
+        Ok(Box::new(reader))
     }
 
     fn get_objects(
@@ -160,13 +160,13 @@ impl Connection for ClickhouseConnection {
         table_name: Option<&str>,
         table_type: Option<Vec<&str>>,
         column_name: Option<&str>,
-    ) -> Result<impl RecordBatchReader + Send> {
+    ) -> Result<Box<dyn RecordBatchReader + Send>> {
         let builder =
             GetObjectsBuilder::new(catalog, db_schema, table_name, table_type, column_name);
         let batch = self.rt.block_on(builder.build(&self.native_conn, &depth))?;
 
         let reader = SingleBatchReader::new(batch);
-        Ok(reader)
+        Ok(Box::new(reader))
     }
 
     fn get_table_schema(
@@ -177,7 +177,10 @@ impl Connection for ClickhouseConnection {
     ) -> Result<Schema> {
         let schema = self
             .rt
-            .block_on(self.arrow_conn.fetch_schema(db_schema, &[table_name], None))
+            .block_on(
+                self.arrow_conn
+                    .fetch_schema(db_schema, &[table_name], None, None),
+            )
             .map(|schemas| {
                 schemas.get(table_name).cloned().ok_or_else(|| {
                     Error::with_message_and_status(
@@ -191,7 +194,7 @@ impl Connection for ClickhouseConnection {
         Ok((*schema).clone())
     }
 
-    fn get_table_types(&self) -> Result<impl RecordBatchReader + Send> {
+    fn get_table_types(&self) -> Result<Box<dyn RecordBatchReader + Send>> {
         // https://github.com/ClickHouse/ClickHouse/blob/21c7dc1724d838042a8fcc5fecd19a9b14b4f93d/src/Storages/System/attachInformationSchemaTables.cpp#L84
         let table_types = vec![
             "BASE TABLE".to_string(),
@@ -207,25 +210,23 @@ impl Connection for ClickhouseConnection {
             vec![Arc::new(array)],
         )?;
 
-        Ok(SingleBatchReader::new(batch))
+        Ok(Box::new(SingleBatchReader::new(batch)))
     }
 
-    #[allow(refining_impl_trait)]
-    fn get_statistic_names(&self) -> Result<SingleBatchReader> {
+    fn get_statistic_names(&self) -> Result<Box<dyn RecordBatchReader + Send>> {
         Err(Error::with_message_and_status(
             "GetStatisticNames not implemented".to_string(),
             Status::NotImplemented,
         ))
     }
 
-    #[allow(refining_impl_trait)]
     fn get_statistics(
         &self,
         _catalog: Option<&str>,
         _db_schema: Option<&str>,
         _table_name: Option<&str>,
         _approximate: bool,
-    ) -> Result<SingleBatchReader> {
+    ) -> Result<Box<dyn RecordBatchReader + Send>> {
         Err(Error::with_message_and_status(
             "GetStatistics is not implemented".to_string(),
             Status::NotImplemented,
@@ -246,8 +247,10 @@ impl Connection for ClickhouseConnection {
         ))
     }
 
-    #[allow(refining_impl_trait)]
-    fn read_partition(&self, _partition: impl AsRef<[u8]>) -> Result<SingleBatchReader> {
+    fn read_partition(
+        &self,
+        _partition: impl AsRef<[u8]>,
+    ) -> Result<Box<dyn RecordBatchReader + Send>> {
         Err(Error::with_message_and_status(
             "ReadPartition is not implemented".to_string(),
             Status::NotImplemented,

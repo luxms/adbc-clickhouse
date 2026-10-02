@@ -6,6 +6,7 @@ use adbc_core::{
     options::{OptionStatement, OptionValue},
 };
 use arrow_array::RecordBatchReader;
+use futures::TryStreamExt;
 
 use crate::{
     reader::ClickhouseReader,
@@ -22,6 +23,25 @@ pub struct ClickhouseStatement {
 }
 
 impl ClickhouseStatement {
+    async fn insert_batch(
+        &self,
+        target_table: &str,
+        batch: arrow_array::RecordBatch,
+    ) -> Result<()> {
+        self.conn
+            .insert(
+                format!("INSERT INTO {target_table} FORMAT Native"),
+                batch,
+                None,
+            )
+            .await
+            .map_err(|err| from_clickhouse_error("Failed to execute update", err))?
+            // The insert stream completes the operation and delivers server errors.
+            .try_for_each(|()| async { Ok(()) })
+            .await
+            .map_err(|err| from_clickhouse_error("Failed to execute update", err))
+    }
+
     pub fn new(rt: Arc<Runtime>, conn: clickhouse_arrow::ArrowClient) -> Self {
         Self {
             rt,
@@ -112,14 +132,14 @@ impl Statement for ClickhouseStatement {
         Ok(())
     }
 
-    fn execute(&mut self) -> Result<impl RecordBatchReader + Send> {
+    fn execute(&mut self) -> Result<Box<dyn RecordBatchReader + Send>> {
         if let Some(query) = &self.sql_query {
             let response = self
                 .rt
                 .block_on(self.conn.query(query, None))
                 .map_err(|err| from_clickhouse_error("Failed to execute query", err))?;
 
-            Ok(ClickhouseReader::new(self.rt.clone(), response))
+            Ok(Box::new(ClickhouseReader::new(self.rt.clone(), response)))
         } else {
             Err(Error::with_message_and_status(
                 "[Clickhouse] SQL query is empty",
@@ -136,27 +156,14 @@ impl Statement for ClickhouseStatement {
         } else if let Some(record_batch) = self.bound_record_batch.take()
             && let Some(target_table) = &self.ingest_target_table
         {
-            let _ = self
-                .rt
-                .block_on(self.conn.insert(
-                    format!("INSERT INTO {target_table} FORMAT Native"),
-                    record_batch,
-                    None,
-                ))
-                .map_err(|err| from_clickhouse_error("Failed to execute update", err))?;
+            self.rt
+                .block_on(self.insert_batch(target_table, record_batch))?;
         } else if let Some(reader) = self.bound_record_batch_reader.take()
             && let Some(target_table) = &self.ingest_target_table
         {
-            let query = format!("INSERT INTO {target_table} FORMAT Native");
-
             self.rt.block_on(async {
                 for batch in reader {
-                    let record_batch = batch?;
-                    let _ = self
-                        .conn
-                        .insert(&query, record_batch, None)
-                        .await
-                        .map_err(|err| from_clickhouse_error("Failed to execute update", err))?;
+                    self.insert_batch(target_table, batch?).await?;
                 }
 
                 Result::Ok(())

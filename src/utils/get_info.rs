@@ -37,12 +37,59 @@ impl GetInfoBuilder {
                     )
                 })?;
 
-        Ok(record_batch)
+        // serde_arrow normalizes the union field to non-nullable. Preserve the
+        // exact ADBC schema without copying the underlying Arrow buffers.
+        record_batch
+            .with_schema(schemas::GET_INFO_SCHEMA.clone())
+            .map_err(Into::into)
     }
 }
 
 impl Default for GetInfoBuilder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use arrow_array::{Int64Array, StringArray, UnionArray};
+
+    use super::*;
+
+    #[test]
+    fn empty_metadata_preserves_adbc_schema() {
+        let batch = GetInfoBuilder::new().finish().unwrap();
+        assert_eq!(batch.num_rows(), 0);
+        assert_eq!(batch.schema().as_ref(), schemas::GET_INFO_SCHEMA.as_ref());
+    }
+
+    #[test]
+    fn metadata_serializes_to_adbc_arrow59_schema() {
+        let mut builder = GetInfoBuilder::new();
+        builder.set_string(InfoCode::VendorName, "ClickHouse");
+        builder.set_number(InfoCode::DriverAdbcVersion, 1_001_000);
+        let batch = builder.finish().unwrap();
+        assert_eq!(batch.schema().as_ref(), schemas::GET_INFO_SCHEMA.as_ref());
+        assert_eq!(batch.num_rows(), 2);
+        let values = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<UnionArray>()
+            .unwrap();
+        assert_eq!(values.type_id(0), 0);
+        assert_eq!(values.type_id(1), 2);
+        let strings = values
+            .child(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let numbers = values
+            .child(2)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        assert_eq!(strings.value(values.value_offset(0)), "ClickHouse");
+        assert_eq!(numbers.value(values.value_offset(1)), 1_001_000);
     }
 }

@@ -75,3 +75,30 @@ impl RecordBatchReader for ClickhouseReader {
         self.schema.clone().expect("failed to fetch schema")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow_array::Int64Array;
+    use arrow_schema::{DataType, Field};
+
+    #[test]
+    fn single_batch_reader_preserves_arrow59_values_and_schema() {
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            DataType::Int64,
+            true,
+        )]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(Int64Array::from(vec![Some(42), None]))],
+        )
+        .unwrap();
+        let mut reader: Box<dyn RecordBatchReader + Send> =
+            Box::new(SingleBatchReader::new(batch.clone()));
+        assert_eq!(reader.schema(), schema);
+        assert_eq!(reader.next().unwrap().unwrap(), batch);
+        assert!(reader.next().is_none());
+        assert_eq!(reader.schema(), schema);
+    }
+}
