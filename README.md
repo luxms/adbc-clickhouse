@@ -4,7 +4,7 @@
 
 This branch uses ADBC Rust 0.24, Arrow 59 and serde_arrow 0.14 with its
 `arrow-59` feature. The matching ClickHouse client is maintained in
-`luxms/clickhouse-arrow` on `upgrade/arrow-59`. All of these dependencies must
+`luxms/clickhouse-arrow` at an exact merged `main` revision. All of these dependencies must
 agree on the Arrow major version when passing record batches in-process.
 Rust 1.96.0 is pinned to match Kuboring, including formatting and linting.
 
