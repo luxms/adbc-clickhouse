@@ -12,7 +12,7 @@ arrow-buffer = "59"
 arrow-schema = "59"
 serde_arrow = { version = "0.14.2", features = ["arrow-59"] }
 
-clickhouse-arrow = { git = "https://github.com/luxms/clickhouse-arrow", rev = "63aa3a3d4ba0f6a2aeb46bba805f8d9a9906c687", features = ["derive"] }
+clickhouse-arrow = { git = "https://github.com/luxms/clickhouse-arrow", rev = "973c3ccc03bcaae686024d29cc368fac21424173", features = ["derive"] }
 
 futures = "0.3.31"
 futures-util = "0.3.31"
